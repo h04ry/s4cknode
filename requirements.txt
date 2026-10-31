@@ -1,0 +1,6 @@
+discord.py[voice]==2.7.1
+imageio-ffmpeg==0.6.0
+python-dotenv>=1,<2
+aiohttp>=3.10,<4
+paramiko>=3,<5
+Flask>=3,<4

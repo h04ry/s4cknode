@@ -1,0 +1,64 @@
+from config_store import get_setting, setting
+import discord
+from discord.ext import commands
+import paramiko
+from pathlib import Path
+
+class RemoteDocker(commands.Cog):
+    target_host = setting('docker.host')
+    target_user = setting('docker.user')
+    allowed_users = setting('docker.allowed_users')
+    allowed_channel = setting('docker.channel_id')
+
+    def __init__(self, bot):
+        self.bot = bot
+        # Private SSH-Einstellungen stehen in SQLite.
+        
+
+    @property
+    def containers(self):
+        return {name: get_setting("docker.container_" + name) for name in ("twitch", "landing", "portainer")}
+
+    def run_remote_ssh(self, command):
+        if not all((self.target_host, self.target_user, get_setting("docker.key_file"))):
+            return "❌ SSH-Einstellungen fehlen in der Konfiguration."
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                hostname=self.target_host, 
+                username=self.target_user,
+                key_filename=str(Path(get_setting("docker.key_file")).expanduser())
+            )
+            stdin, stdout, stderr = client.exec_command(command)
+            output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
+            client.close()
+            
+            if error and not output:
+                return f"⚠️ {error}"
+            return output if output else "✅ Erledigt."
+        except Exception as e:
+            return f"❌ SSH-Fehler: {str(e)}"
+
+    @commands.command(name="miner")
+    @commands.guild_only()
+    async def twitch_control(self, ctx, action: str):
+        if ctx.author.id not in self.allowed_users or ctx.channel.id != self.allowed_channel:
+            return
+
+        if action not in ["start", "stop", "restart", "status"]:
+            return await ctx.send("❓ Nutze: !twitch start | stop | restart | status")
+
+        async with ctx.typing():
+            container = self.containers["twitch"]
+            if action == "status":
+                cmd = f"/usr/bin/docker inspect -f '{{{{.State.Status}}}}' {container}"
+            else:
+                cmd = f"/usr/bin/docker {action} {container}"
+            
+            result = self.run_remote_ssh(cmd)
+            await ctx.reply(f"🎮 **Twitch-Miner {action}:** `{result}`")
+
+async def setup(bot):
+    await bot.add_cog(RemoteDocker(bot))

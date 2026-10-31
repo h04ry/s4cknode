@@ -1,0 +1,71 @@
+from config_store import setting
+import discord
+from discord.ext import commands
+
+class Requests(commands.Cog):
+    request_channel_id = setting('requests.channel_id')
+    category_id = setting('requests.category_id')
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command(name="request")
+    @commands.guild_only()
+    async def create_request(self, ctx, *, filmtitel: str):
+        # Prüfen, ob der Befehl im richtigen Kanal geschrieben wurde
+        if ctx.channel.id != self.request_channel_id:
+            return
+
+        # Den geschriebenen Befehl sofort löschen
+        await ctx.message.delete()
+
+        guild = ctx.guild
+        category = discord.utils.get(guild.categories, id=self.category_id)
+
+        if not category:
+            return print("Fehler: Kategorie wurde nicht gefunden!")
+
+        # Berechtigungen für den neuen Kanal setzen
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False), # Keiner sieht ihn
+            ctx.author: discord.PermissionOverwrite(read_messages=True, send_messages=True), # Ersteller sieht ihn
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True) # Bot sieht ihn
+        }
+        
+        # Admins hinzufügen (Jeder mit Administrator-Rechten)
+        for role in guild.roles:
+            if role.permissions.administrator:
+                overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        # Kanal erstellen
+        channel_name = f"{ctx.author.name}-request"
+        new_channel = await guild.create_text_channel(
+            name=channel_name,
+            category=category,
+            overwrites=overwrites
+        )
+
+        # Nachricht im neuen Kanal senden
+        embed = discord.Embed(
+            title="🎥 Neuer Film-Request",
+            description=f"# {filmtitel}",
+            color=discord.Color.gold()
+        )
+        embed.set_author(name=f"Anfrage von {ctx.author.display_name}")
+        embed.add_field(name="Status", value="Wartet auf Bearbeitung...")
+        embed.set_footer(text="Schließe diesen Kanal mit !close")
+
+        await new_channel.send(content=ctx.author.mention, embed=embed)
+
+    @commands.command(name="close")
+    @commands.guild_only()
+    async def close_request(self, ctx):
+        # Prüfen, ob der Kanal in der Request-Kategorie liegt
+        if ctx.channel.category_id == self.category_id:
+            await ctx.send("🚨 **Dieser Kanal wird in 5 Sekunden gelöscht...**")
+            import asyncio
+            await asyncio.sleep(5)
+            await ctx.channel.delete()
+
+async def setup(bot):
+    await bot.add_cog(Requests(bot))

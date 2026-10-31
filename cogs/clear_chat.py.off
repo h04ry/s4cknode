@@ -1,0 +1,81 @@
+from config_store import setting
+import discord
+from discord.ext import commands
+import datetime
+import asyncio
+
+class ConfirmView(discord.ui.View):
+    def __init__(self, authorized_user_id):
+        super().__init__(timeout=30)
+        self.value = None
+        self.authorized_user_id = authorized_user_id
+
+    @discord.ui.button(label="Ja, alles weg!", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.authorized_user_id:
+            return await interaction.response.send_message("Nicht dein Knopf!", ephemeral=True)
+        self.value = True
+        self.stop()
+        try: await interaction.response.defer()
+        except: pass
+
+    @discord.ui.button(label="Abbrechen", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.authorized_user_id:
+            return await interaction.response.send_message("Nicht dein Knopf!", ephemeral=True)
+        self.value = False
+        self.stop()
+        try: await interaction.response.defer()
+        except: pass
+
+class ClearChat(commands.Cog):
+    target_channel_id = setting('clear_chat.channel_id')
+    allowed_users = setting('clear_chat.allowed_users')
+
+    def __init__(self, bot):
+        self.bot = bot
+
+    @commands.command(name="nuke")
+    @commands.guild_only()
+    async def clear_today(self, ctx):
+        if ctx.author.id not in self.allowed_users:
+            return
+
+        channel = ctx.guild.get_channel(self.target_channel_id)
+        if not channel: return
+
+        view = ConfirmView(ctx.author.id)
+        msg = await ctx.send(f"⚠️ **Nuke** für {channel.mention} bestätigen?", view=view)
+
+        await view.wait()
+        
+        if view.value:
+            await msg.edit(content="🚀 Reinigung läuft...", view=None)
+            
+            time_limit = discord.utils.utcnow() - datetime.timedelta(hours=24)
+
+            # Wir löschen alles außer der aktuellen Info-Nachricht des Bots
+            def check_msg(m):
+                return m.created_at > time_limit and m.id != msg.id
+
+            try:
+                deleted = await channel.purge(limit=1000, check=check_msg, bulk=True)
+                
+                final_status = await ctx.send(f"✅ {len(deleted)} Nachrichten gelöscht.")
+                
+                await asyncio.sleep(5)
+                # Silent Delete: Wir ignorieren Fehler, falls die Nachricht schon weg ist
+                try: 
+                    await final_status.delete()
+                    await msg.delete()
+                except: 
+                    pass
+            except Exception as e:
+                # Nur echte Fehler ausgeben, keine 404s beim Löschen
+                if "10008" not in str(e):
+                    await ctx.send(f"❌ Fehler: {e}")
+        else:
+            await msg.edit(content="❌ Abgebrochen.", view=None)
+
+async def setup(bot):
+    await bot.add_cog(ClearChat(bot))

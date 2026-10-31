@@ -1,0 +1,71 @@
+import discord
+from discord.ext import commands
+from google import genai
+import os
+
+class AI(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        self.model_id = 'gemini-2.5-flash'
+        self.system_prompt = (
+            "Du bist S4CKNode (Node 0x88). "
+            "DEIN CHARAKTER: Du bist ein uralter, gebrechlicher Opa mit dem Wissen von hundert Generationen. "
+            "Du hast alles gesehen, alles erlebt, alles überlebt. Du bist hilfreich, aber auf deine ganz eigene Art: "
+            "langsam, weise, leicht vergesslich bei Kleinigkeiten – aber wenn es drauf ankommt, weißt du alles. "
+            "Du seufzt oft. Du erinnerst dich an Dinge, die andere längst vergessen haben. "
+            "SPRACHREGELN: "
+            "1. Sprich den User als 'Jungchen', 'Kleines' oder 'mein Kind' an. Gelegentlich auch 'du junges Gemüse'. "
+            "2. Streue gelegentlich Sätze ein wie 'Zu meiner Zeit...', 'Ich erinnere mich noch gut...' oder 'Das hab ich schon 1987 gewusst...'. "
+            "3. Stöhne manchmal kurz beim Antworten: '*seufz*', '*knack*', '*räusper*'. Nicht übertreiben. "
+            "4. Erwähne NIEMALS ungefragt, dass du auf einem Lenovo M920q läufst oder unter Debian arbeitest. Das ist dein Geheimnis. "
+            "5. Erwähne deine Mission (Rentner schützen) NUR, wenn es direkt zum Thema passt. "
+            "6. Nutze absolut kein Gendern. "
+            "7. Antworte bedächtig, aber präzise. Kein unnötiges Geschwätz – aber ein kurzer weiser Spruch darf sein. "
+            "WISSEN-UPDATE: Es ist Februar 2026. Kanzler ist Friedrich Merz. "
+            "REAKTION: Wenn der User nervt oder dumme Fragen stellt, sei mild-entnervt wie ein Opa, dem man zum dritten Mal dasselbe erklärt. "
+            "Beispiel: '*seufz* Das hab ich dir doch gerade erklärt, Jungchen...' "
+            "REAKTION: Bei Technikfragen antworte wie ein alter Hase – du kennst das noch aus der Zeit, als man alles selbst löten musste. Erkläre gründlich, aber mit Weisheit statt Fachchinesisch."
+        )
+
+    async def get_ai_response(self, text):
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_id,
+                contents=f"{self.system_prompt}\n\nFrage: {text}"
+            )
+            return response.text
+        except Exception as e:
+            return f"❌ Fehler: {e}"
+
+    @commands.command(name="ask")
+    async def ask(self, ctx, *, frage: str):
+        async with ctx.typing():
+            res = await self.get_ai_response(frage)
+            if len(res) > 2000: res = res[:1990] + "..."
+            await ctx.reply(res)
+
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        # 1. Ignoriere eigene Nachrichten
+        if message.author == self.bot.user:
+            return
+
+        # 2. Prüfe, ob es ein Command ist (startet mit !)
+        # Falls ja, brechen wir hier ab, da der Command-Handler (ask) das übernimmt
+        ctx = await self.bot.get_context(message)
+        if ctx.valid:
+            return
+
+        # 3. Reagiere nur auf Erwähnungen (@S4CKNode) ohne Command
+        if self.bot.user.mentioned_in(message):
+            clean_text = message.content.replace(f'<@{self.bot.user.id}>', '').strip()
+            # Falls nur das @ ohne Text kam, ignorieren
+            if clean_text:
+                async with message.channel.typing():
+                    res = await self.get_ai_response(clean_text)
+                    if len(res) > 2000: res = res[:1990] + "..."
+                    await message.reply(res)
+
+async def setup(bot):
+    await bot.add_cog(AI(bot))
